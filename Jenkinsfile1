@@ -1,14 +1,21 @@
 pipeline {
   agent any
+
   tools {
     jdk 'jdk17'
-    nodejs 'node18'                // <<< use Node 18 (LTS) for Sonar JS analyzer compatibility
+    nodejs 'node18' // use Node 18 (LTS) for Sonar JS analyzer compatibility
   }
+
   environment {
     SCANNER_HOME = tool 'sonar-scanner'
   }
+
   stages {
-    stage('Clean Workspace') { steps { cleanWs() } }
+    stage('Clean Workspace') {
+      steps {
+        cleanWs()
+      }
+    }
 
     stage('Checkout from Git') {
       steps {
@@ -21,13 +28,16 @@ pipeline {
     stage('Detect App Dir') {
       steps {
         script {
-          env.APP_DIR = sh(returnStdout: true, script: '''
-            set -e
-            if [ -f package.json ]; then echo "."; exit 0; fi
-            d="$(dirname "$(find . -maxdepth 3 -type f -name package.json | head -n1)")"
-            d="${d#./}"
-            [ -z "$d" ] && { echo "No package.json found"; exit 1; } || echo "$d"
-          ''').trim()
+          env.APP_DIR = sh(
+            returnStdout: true,
+            script: '''
+              set -e
+              if [ -f package.json ]; then echo "."; exit 0; fi
+              d="$(dirname "$(find . -maxdepth 3 -type f -name package.json | head -n1)")"
+              d="${d#./}"
+              [ -z "$d" ] && { echo "No package.json found"; exit 1; } || echo "$d"
+            '''
+          ).trim()
           echo "APP_DIR=${env.APP_DIR}"
         }
       }
@@ -72,7 +82,7 @@ pipeline {
             def qg = waitForQualityGate abortPipeline: false, credentialsId: 'Sonar-token'
             echo "Quality Gate: ${qg.status} -> ${qg.description}"
             if (qg.status != 'OK') {
-              currentBuild.result = 'FAILURE'   // or 'UNSTABLE' if you want to proceed
+              currentBuild.result = 'FAILURE' // or 'UNSTABLE' if you want to proceed
               error "Quality Gate failed: ${qg.description}"
             }
           }
@@ -82,10 +92,14 @@ pipeline {
 
     stage('OWASP FS Scan') {
       steps {
-        dependencyCheck additionalArguments: "--scan ${APP_DIR} --disableAssembly --disableYarnAudit --disableNodeAudit", odcInstallation: 'DP-Check'
+        dependencyCheck(
+          additionalArguments: "--scan ${APP_DIR} --disableAssembly --disableYarnAudit --disableNodeAudit",
+          odcInstallation: 'DP-Check'
+        )
         dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
       }
     }
+
     stage('Trivy FS Scan') {
       steps {
         sh 'trivy fs --scanners vuln --skip-files dependency-check-report.xml . > trivyfs.txt || true'
@@ -137,14 +151,15 @@ pipeline {
 
   post {
     always {
-      emailext attachLog: true,
+      emailext(
+        attachLog: true,
         subject: "'${currentBuild.result}'",
         body: "Project: ${env.JOB_NAME}<br/>" +
               "Build Number: ${env.BUILD_NUMBER}<br/>" +
               "URL: ${env.BUILD_URL}<br/>",
         to: 'saishamahadik23@gmail.com',
         attachmentsPattern: 'trivyfs.txt'
+      )
     }
   }
 }
-
